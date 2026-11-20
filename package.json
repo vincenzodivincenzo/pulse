@@ -1,6 +1,6 @@
 {
   "name": "pulse",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Research-oriented heart rate recorder for macOS: any Bluetooth HR sensor, HRV metrics, phase markers, anomaly checks and session reports.",
   "main": "main.js",
   "scripts": {

@@ -27,6 +27,7 @@ xattr -dr com.apple.quarantine /Applications/Pulse.app
 - **Live research metrics.** HR 10/30 s, %HRmax and %HRR, RMSSD, SDNN, pNN50, DFA α1, LF/HF, breathing rate from RSA, Edwards TRIMP, heart rate recovery and signal quality, each with an explanation one click away.
 - **Standard zones.** Five zones at 50–60, 60–70, 70–80, 80–90 and 90–100% of max HR, or of heart rate reserve (Karvonen) when a resting HR is set. Max HR is entered or estimated from age (Tanaka).
 - **Phase markers and notes.** Keys 1–9 drop configurable markers (Baseline, Warm-up, Test, Recovery…). Phase markers label every reading until the next phase. N adds a timestamped free note.
+- **Protocol templates.** Run a timed protocol and Pulse handles the phases: countdown, beeps, spoken cues, and a phase marker at every stage. Built in: Resting HRV (5 min), Orthostatic test, Incremental ramp test, Intervals 6 × 1 min and Heart rate recovery test. Build your own with repeat blocks and auto-stop.
 - **Anomaly checks.** Dropouts, sudden jumps, flatlines, lost skin contact, implausible values, bursts of irregular beats, heart rate above the profile max, low HR and elevated resting HR.
 - **Named sessions in a registry.** Every recording needs a name and can carry a participant ID, protocol, profile and notes. Sessions are searchable, renamable, and can be re-analyzed from the raw files at any time.
 - **PNG reports.** One click exports a printable report: metadata, summary, full chart with phases and markers, RR tachogram, time in zones, per-phase table and anomalies.
@@ -60,12 +61,25 @@ http://<your-mac>:8787/hr?bpm=72&rr=812,830&token=<token>
 
 `bpm` must be 20–250. `rr` is optional, in milliseconds. A connected Bluetooth sensor takes priority over network input.
 
+## Protocols
+
+Open **Run protocol…** on the live view, pick a template and press **Start**. Pulse asks for the session name, starts recording, then walks through the stages:
+
+- Each stage drops a phase marker named after it (`Stage 1`, `Stage 2`… inside a repeat block), so the session table splits by stage automatically.
+- Timed stages count down with three beeps before the change. Open-ended stages count up until you press **Next stage**.
+- **Skip to …** jumps past a repeat block, for example when a participant stops a ramp test.
+- Templates with auto-stop end the recording when the last timed stage finishes.
+- The planned stages are saved in `session.json` as `protocol_plan`, next to the markers of what actually happened.
+
+Custom templates have a label, a duration (`m:ss`, or empty for open-ended) and a cue per stage, plus one optional repeat block. Name a stage `Recovery` or `Cool-down` to get HRR60/HRR120, and `Baseline`, `Rest` or `Supine` to enable the elevated resting HR check.
+
 ## Keyboard
 
 | Key | Action |
 | --- | --- |
 | 1–9 | Drop the marker assigned to that key |
 | N | Add a note, timestamped when you press N |
+| Space or → | Next protocol stage |
 | Enter / Esc | Save / cancel the note |
 
 Keys work whenever you are not typing in a field.

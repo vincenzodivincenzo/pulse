@@ -241,6 +241,7 @@ function finalize(dir, meta, samples, markers, start, end) {
     name: meta.name,
     participant: meta.participant || '',
     protocol: meta.protocol || '',
+    protocol_plan: meta.protocol_plan || null,
     notes: meta.notes || '',
     device: meta.device || '',
     started_at: new Date(start).toISOString(),
@@ -271,6 +272,7 @@ ipcMain.handle('rec:start', (_e, meta) => {
   writeMarkers(dir, rec.start, []);
   fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({
     format: 'pulse-session', version: 2, name, participant: meta.participant || '', protocol: meta.protocol || '',
+    protocol_plan: meta.protocol_plan || null,
     notes: meta.notes || '', device: meta.device || '', started_at: new Date(meta.start).toISOString(), profile: meta.profile || {}, recording: true,
   }, null, 2) + '\n');
   log('rec start', dir);

@@ -128,6 +128,33 @@
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5.5A1.5 1.5 0 0 1 4.5 4h11A1.5 1.5 0 0 1 17 5.5v9a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5zM5.5 7v1.6h1.6V7zm3.7 0v1.6h1.6V7zm3.7 0v1.6h1.6V7zM5.5 10.4V12h1.6v-1.6zm3.7 0V12h1.6v-1.6zm3.7 0V12h1.6v-1.6z" fill="currentColor" fill-rule="evenodd"/></svg>
             </button>
           </div>
+          <div class="proto" id="proto" aria-live="polite">
+            <div class="proto-idle" id="proto-idle">
+              <button class="btn" id="proto-open" type="button">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15zm0 1.7a5.8 5.8 0 1 1 0 11.6 5.8 5.8 0 0 1 0-11.6zM9.2 6v4.4l3.4 2 .8-1.3-2.6-1.6V6z" fill="currentColor"/></svg>
+                Run protocol…
+              </button>
+              <span class="muted small">Timed stages with cues that place phase markers for you.</span>
+            </div>
+            <div class="proto-run" id="proto-run" hidden>
+              <div class="proto-top">
+                <div class="proto-main">
+                  <span class="proto-step muted" id="proto-step"></span>
+                  <strong class="proto-label" id="proto-label"></strong>
+                  <span class="proto-cue" id="proto-cue"></span>
+                </div>
+                <div class="proto-time" id="proto-time" aria-label="Stage time">0:00</div>
+              </div>
+              <div class="proto-bar" id="proto-bar" aria-hidden="true"></div>
+              <div class="proto-bottom">
+                <span class="muted small" id="proto-next"></span>
+                <span class="spacer"></span>
+                <button class="btn small" id="proto-skip" type="button" hidden>End effort</button>
+                <button class="btn small primary" id="proto-nextbtn" type="button" title="Space or → also advances">Next stage</button>
+                <button class="btn small ghost" id="proto-end" type="button">End protocol</button>
+              </div>
+            </div>
+          </div>
           <div class="keys" id="keys" role="group" aria-label="Annotation keys"></div>
           <form class="note-row" id="note-row" hidden>
             <span class="note-time" id="note-time">00:00</span>
@@ -314,7 +341,59 @@
     </form>
   </dialog>
 
+  <dialog id="proto-dialog" class="wide">
+    <form method="dialog" id="proto-form">
+      <h2>Run a protocol</h2>
+      <p class="muted">Each stage drops a phase marker, shows a countdown and plays a cue. You can still use keys 1–9 and N during the protocol.</p>
+      <div class="tpl-list" id="tpl-list" role="radiogroup" aria-label="Protocols"></div>
+      <div class="tpl-actions">
+        <button class="btn small" id="tpl-new" type="button">New…</button>
+        <button class="btn small" id="tpl-dup" type="button">Duplicate</button>
+        <button class="btn small" id="tpl-edit" type="button">Edit…</button>
+        <button class="btn small ghost danger-text" id="tpl-del" type="button">Delete</button>
+        <span class="spacer"></span>
+        <label class="switch small"><input type="checkbox" id="opt-beeps"> Beeps</label>
+        <label class="switch small"><input type="checkbox" id="opt-voice"> Voice cues</label>
+      </div>
+      <p class="field-error" id="proto-error" hidden></p>
+      <div class="dialog-actions">
+        <span class="muted small" id="proto-start-hint"></span>
+        <span class="spacer"></span>
+        <button class="btn ghost" value="cancel" formnovalidate type="submit">Cancel</button>
+        <button class="btn primary" value="start" type="submit" id="proto-start">Start…</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="tpl-dialog" class="wider">
+    <form method="dialog" id="tpl-form" novalidate>
+      <h2 id="tpl-title">Edit protocol</h2>
+      <div class="form-grid">
+        <label class="wide">Name<input name="name" type="text" autocomplete="off" placeholder="e.g. Cycling ramp 25 W/min…"></label>
+        <label class="wide">Description<input name="description" type="text" autocomplete="off" placeholder="What the participant does…"></label>
+      </div>
+      <div class="stage-head muted small"><span>#</span><span>Stage label</span><span>Duration</span><span>Cue (shown and spoken)</span><span></span></div>
+      <ol class="stage-rows" id="stage-rows"></ol>
+      <button class="btn small" id="stage-add" type="button">Add stage</button>
+      <div class="repeat-row">
+        <label class="switch small"><input type="checkbox" name="repeatOn"> Repeat stages</label>
+        <label class="inline">from <input name="repeatFrom" type="number" min="1" inputmode="numeric"></label>
+        <label class="inline">to <input name="repeatTo" type="number" min="1" inputmode="numeric"></label>
+        <label class="inline">× <input name="repeatTimes" type="number" min="2" max="50" inputmode="numeric"></label>
+      </div>
+      <label class="switch small"><input type="checkbox" name="autoStop"> Stop the recording when the last timed stage ends</label>
+      <p class="muted small" id="tpl-preview"></p>
+      <p class="field-error" id="tpl-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button class="btn ghost" value="cancel" formnovalidate type="submit">Cancel</button>
+        <button class="btn primary" value="save" type="submit">Save protocol</button>
+      </div>
+    </form>
+  </dialog>
+
   <script src="metrics.js"></script>
+  <script src="protocols.js"></script>
   <script src="charts.js"></script>
   <script src="app.js"></script>
 </body>

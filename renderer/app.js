@@ -30,6 +30,7 @@ const S = {
   range: 300000, hoverT: null,
   view: 'live', registry: [], current: null, sHoverT: null,
   noteAt: 0, demoTimer: null, net: null,
+  proto: null, pendingProto: null, customTpls: [], tplSel: 'resting-hrv', audio: { beeps: true, voice: true },
 };
 
 // ---------- Small helpers ----------
@@ -543,7 +544,10 @@ function flashKey(key) {
 function addMarker(key, note = '', t = Date.now()) {
   const def = key === 'N' ? { label: 'Note', phase: false } : S.keys[key];
   if (!def || !def.label) return;
-  const m = { id: crypto.randomUUID(), t, key: String(key), label: def.label, phase: !!def.phase, note, bpm: S.state === 'live' ? S.live.bpm : null };
+  return pushMarker({ key: String(key), label: def.label, phase: !!def.phase, note, t });
+}
+function pushMarker({ key, label, phase, note = '', t = Date.now() }) {
+  const m = { id: crypto.randomUUID(), t, key, label, phase: !!phase, note, bpm: S.state === 'live' ? S.live.bpm : null };
   S.markers.push(m);
   S.markers.sort((a, b) => a.t - b.t);
   if (S.rec) api.recMarkers(S.markers);
@@ -633,6 +637,7 @@ document.addEventListener('keydown', (e) => {
   if (document.querySelector('dialog[open]')) return;
   const tag = e.target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  if (S.proto && (e.key === ' ' || e.key === 'ArrowRight')) { e.preventDefault(); protoNext(); return; }
   if (/^[1-9]$/.test(e.key)) { e.preventDefault(); addMarker(e.key); }
   else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); if (S.view !== 'live') showLive(); openNote(); }
 });
@@ -688,11 +693,11 @@ function applyProfile(p) {
 // ---------- Dialogs ----------
 const recDlg = $('rec-dialog');
 const recForm = $('rec-form');
-async function openRecDialog() {
+async function openRecDialog(opts = {}) {
   const st = await api.getState();
   recForm.elements.name.value = '';
   recForm.elements.participant.value = st.lastParticipant || '';
-  recForm.elements.protocol.value = st.lastProtocol || '';
+  recForm.elements.protocol.value = opts.protocol ?? st.lastProtocol ?? '';
   recForm.elements.notes.value = '';
   $('rec-name-error').hidden = true;
   wireProfileForm(recForm, S.profile);
@@ -721,6 +726,7 @@ recForm.addEventListener('submit', async (e) => {
     profile,
     device: S.source?.name || '',
     start: Date.now(),
+    protocol_plan: S.pendingProto ? protocolPlan(S.pendingProto) : null,
   };
   applyProfile(profile);
   api.setState({ lastParticipant: meta.participant, lastProtocol: meta.protocol });
@@ -735,12 +741,14 @@ recForm.addEventListener('submit', async (e) => {
     setState(S.state);
     loadRegistry();
     announce(`Recording ${name}`);
+    if (S.pendingProto) { const t = S.pendingProto; S.pendingProto = null; startProtocol(t); }
   } catch (err) {
     toast(`Could not start recording: ${err.message}`);
   }
 });
 
 async function stopRecording() {
+  if (S.proto) endProtocol({ silent: true });
   const res = await api.recStop({ markers: S.markers });
   const name = S.rec?.name;
   S.rec = null;
@@ -751,6 +759,7 @@ async function stopRecording() {
   if (res) toast(`Saved “${name}”.`, 'Open', () => openSession(res.dir), 8000);
 }
 $('rec-btn').addEventListener('click', () => (S.rec ? stopRecording() : openRecDialog()));
+recDlg.addEventListener('close', () => { if (!S.rec) S.pendingProto = null; });
 
 const profDlg = $('profile-dialog');
 const profForm = $('profile-form');
@@ -833,6 +842,330 @@ keysForm.addEventListener('submit', (e) => {
   S.keys = keys;
   api.setState({ keys });
   renderKeys();
+});
+
+// ---------- Protocols ----------
+const PR = window.PulseProtocols;
+const allTpls = () => [...PR.BUILTIN, ...S.customTpls];
+const findTpl = (id) => allTpls().find((t) => t.id === id);
+let actx = null;
+let protoTimer = null;
+
+function beep(freq = 880, ms = 130, times = 1) {
+  if (!S.audio.beeps) return;
+  try {
+    actx = actx || new AudioContext();
+    for (let k = 0; k < times; k++) {
+      const t = actx.currentTime + k * 0.2;
+      const o = actx.createOscillator();
+      const g = actx.createGain();
+      o.type = 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.25, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + ms / 1000);
+      o.connect(g).connect(actx.destination);
+      o.start(t);
+      o.stop(t + ms / 1000 + 0.02);
+    }
+  } catch { /* audio unavailable */ }
+}
+function speak(text) {
+  if (!S.audio.voice || !window.speechSynthesis) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.05;
+    speechSynthesis.speak(u);
+  } catch { /* speech unavailable */ }
+}
+const mmss = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+function protocolPlan(tpl) {
+  return { id: tpl.id, name: tpl.name, auto_stop: !!tpl.autoStop, stages: PR.expand(tpl).map((s) => ({ label: s.label, planned_s: s.dur || null })) };
+}
+function startProtocol(tpl) {
+  S.proto = { tpl, stages: PR.expand(tpl), i: -1, t0: 0, cd: 0 };
+  clearInterval(protoTimer);
+  protoTimer = setInterval(protoTick, 200);
+  enterStage(0, Date.now());
+  api.debug(`protocol start ${tpl.name} (${S.proto.stages.length} stages)`);
+}
+function enterStage(i, t = Date.now()) {
+  const pr = S.proto;
+  const st = pr.stages[i];
+  pr.i = i;
+  pr.t0 = t;
+  pr.cd = 0;
+  pushMarker({ key: `P${i + 1}`, label: st.label, phase: true, t });
+  beep(880, 140, 2);
+  speak(st.cue ? `${st.label}. ${st.cue}` : st.label);
+  announce(`Stage ${i + 1}: ${st.label}`);
+  renderProto();
+}
+function protoNext() {
+  const pr = S.proto;
+  if (!pr) return;
+  if (pr.i + 1 >= pr.stages.length) finishProtocol();
+  else enterStage(pr.i + 1);
+}
+function protoSkipBlock() {
+  const pr = S.proto;
+  if (!pr) return;
+  let j = pr.i + 1;
+  while (j < pr.stages.length && pr.stages[j].inBlock) j++;
+  if (j >= pr.stages.length) finishProtocol();
+  else enterStage(j);
+}
+function finishProtocol() {
+  const tpl = S.proto.tpl;
+  endProtocol({ silent: true });
+  beep(660, 450, 1);
+  speak('Protocol complete.');
+  if (tpl.autoStop && S.rec) stopRecording();
+  else toast(`Protocol “${tpl.name}” complete.`);
+}
+function endProtocol({ silent = false } = {}) {
+  if (!S.proto) return;
+  if (!silent) {
+    pushMarker({ key: 'P', label: 'Protocol ended', phase: false, note: `at stage ${S.proto.i + 1} of ${S.proto.stages.length}` });
+    speak('Protocol ended.');
+  }
+  clearInterval(protoTimer);
+  protoTimer = null;
+  S.proto = null;
+  renderProto();
+}
+function protoTick() {
+  const pr = S.proto;
+  if (!pr) return;
+  const st = pr.stages[pr.i];
+  if (st.dur) {
+    const left = st.dur * 1000 - (Date.now() - pr.t0);
+    const secs = Math.ceil(left / 1000);
+    if (secs >= 1 && secs <= 3 && secs !== pr.cd) { pr.cd = secs; beep(660, 90, 1); }
+    if (left <= 0) {
+      const endT = pr.t0 + st.dur * 1000; // keep the schedule exact
+      if (pr.i + 1 >= pr.stages.length) return finishProtocol();
+      return enterStage(pr.i + 1, endT);
+    }
+  }
+  renderProtoTime();
+}
+function renderProto() {
+  const pr = S.proto;
+  $('proto-idle').hidden = !!pr;
+  $('proto-run').hidden = !pr;
+  if (!pr) return;
+  const st = pr.stages[pr.i];
+  const nx = pr.stages[pr.i + 1];
+  $('proto-step').textContent = `${pr.tpl.name} · stage ${pr.i + 1} of ${pr.stages.length}`;
+  $('proto-label').textContent = st.label;
+  $('proto-cue').textContent = st.cue || '';
+  $('proto-next').textContent = nx ? `Next: ${nx.label} · ${PR.fmtDur(nx.dur)}` : st.dur ? 'Last stage' : 'Last stage · press Finish when done';
+  const skip = $('proto-skip');
+  skip.hidden = !st.inBlock;
+  if (st.inBlock) {
+    let j = pr.i + 1;
+    while (j < pr.stages.length && pr.stages[j].inBlock) j++;
+    skip.textContent = pr.stages[j] ? `Skip to ${pr.stages[j].label}` : 'End repeats';
+    skip.title = 'Jump past the repeated stages, for example when the participant stops a ramp test';
+  }
+  $('proto-nextbtn').textContent = nx ? 'Next stage' : 'Finish';
+  const bar = $('proto-bar');
+  bar.innerHTML = '';
+  pr.stages.forEach((s, k) => {
+    const el = document.createElement('span');
+    el.style.flexGrow = String(Math.max(1, (s.dur || 60) / 30));
+    if (k < pr.i) el.className = 'done';
+    else if (k === pr.i) el.className = 'now';
+    el.title = `${s.label} · ${PR.fmtDur(s.dur)}`;
+    bar.appendChild(el);
+  });
+  renderProtoTime();
+}
+function renderProtoTime() {
+  const pr = S.proto;
+  if (!pr) return;
+  const st = pr.stages[pr.i];
+  const el = Date.now() - pr.t0;
+  const t = $('proto-time');
+  if (st.dur) {
+    const left = Math.max(0, st.dur * 1000 - el);
+    t.textContent = mmss(Math.ceil(left / 1000) * 1000);
+    t.classList.toggle('ending', left <= 3000);
+  } else {
+    t.textContent = `+${mmss(el)}`;
+    t.classList.remove('ending');
+  }
+}
+$('proto-nextbtn').addEventListener('click', protoNext);
+$('proto-skip').addEventListener('click', protoSkipBlock);
+$('proto-end').addEventListener('click', () => endProtocol());
+
+// Protocol picker
+const protoDlg = $('proto-dialog');
+const protoForm = $('proto-form');
+function renderTplList() {
+  const wrap = $('tpl-list');
+  wrap.innerHTML = '';
+  if (!findTpl(S.tplSel)) S.tplSel = PR.BUILTIN[0].id;
+  for (const t of allTpls()) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tpl';
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', String(t.id === S.tplSel));
+    b.tabIndex = t.id === S.tplSel ? 0 : -1;
+    b.dataset.id = t.id;
+    b.innerHTML = `<span class="tpl-name">${esc(t.name)}<span class="badge">${t.builtin ? 'Built-in' : 'Custom'}</span>${t.autoStop ? '<span class="badge" title="Stops the recording at the end">auto-stop</span>' : ''}</span>${t.description ? `<span class="tpl-desc">${esc(t.description)}</span>` : ''}<span class="tpl-sum">${esc(PR.summary(t))}</span>`;
+    b.addEventListener('click', () => { S.tplSel = t.id; renderTplList(); wrap.querySelector(`[data-id="${CSS.escape(t.id)}"]`).focus(); });
+    b.addEventListener('dblclick', () => { S.tplSel = t.id; protoForm.requestSubmit($('proto-start')); });
+    wrap.appendChild(b);
+  }
+  const sel = findTpl(S.tplSel);
+  $('tpl-edit').disabled = !sel || sel.builtin;
+  $('tpl-del').disabled = !sel || sel.builtin;
+}
+$('tpl-list').addEventListener('keydown', (e) => {
+  if (!['ArrowDown', 'ArrowUp'].includes(e.key)) return;
+  e.preventDefault();
+  const list = allTpls();
+  const i = list.findIndex((t) => t.id === S.tplSel);
+  const n = list[(i + (e.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length];
+  S.tplSel = n.id;
+  renderTplList();
+  $('tpl-list').querySelector(`[data-id="${CSS.escape(n.id)}"]`).focus();
+});
+function openProtoDialog() {
+  if (S.proto) { toast('A protocol is already running. End it first.'); return; }
+  renderTplList();
+  $('opt-beeps').checked = S.audio.beeps;
+  $('opt-voice').checked = S.audio.voice;
+  const live = S.state === 'live' || S.state === 'stale';
+  $('proto-start').disabled = !live;
+  $('proto-start').textContent = S.rec ? 'Start now' : 'Start…';
+  $('proto-start-hint').textContent = !live ? 'Connect a source first.' : S.rec ? `Runs inside “${S.rec.name}”.` : 'You name the recording next.';
+  $('proto-error').hidden = true;
+  protoDlg.showModal();
+  $('tpl-list').querySelector('[aria-checked="true"]')?.focus();
+}
+$('proto-open').addEventListener('click', openProtoDialog);
+for (const id of ['opt-beeps', 'opt-voice']) {
+  $(id).addEventListener('change', () => {
+    S.audio = { beeps: $('opt-beeps').checked, voice: $('opt-voice').checked };
+    api.setState({ audio: S.audio });
+    if (id === 'opt-beeps' && S.audio.beeps) beep(880, 120, 1);
+    if (id === 'opt-voice' && S.audio.voice) speak('Voice cues on.');
+  });
+}
+protoForm.addEventListener('submit', (e) => {
+  if (e.submitter?.value !== 'start' && e.submitter?.id !== 'proto-start') return;
+  const tpl = findTpl(S.tplSel);
+  if (!tpl) { e.preventDefault(); return; }
+  api.setState({ tplSel: tpl.id });
+  if (S.rec) startProtocol(tpl);
+  else { S.pendingProto = tpl; setTimeout(() => openRecDialog({ protocol: tpl.name }), 0); }
+});
+$('tpl-new').addEventListener('click', () => openTplEditor({ id: '', name: '', description: '', autoStop: true, stages: [{ label: 'Baseline', dur: 120, cue: '' }] }, 'new'));
+$('tpl-dup').addEventListener('click', () => {
+  const t = findTpl(S.tplSel);
+  if (t) openTplEditor({ ...structuredClone(t), id: '', builtin: false, name: `${t.name} (copy)` }, 'new');
+});
+$('tpl-edit').addEventListener('click', () => { const t = findTpl(S.tplSel); if (t && !t.builtin) openTplEditor(structuredClone(t), 'edit'); });
+$('tpl-del').addEventListener('click', () => {
+  const t = findTpl(S.tplSel);
+  if (!t || t.builtin) return;
+  const before = S.customTpls;
+  S.customTpls = S.customTpls.filter((x) => x.id !== t.id);
+  api.setState({ protocols: S.customTpls });
+  renderTplList();
+  toast(`Deleted “${t.name}”.`, 'Undo', () => { S.customTpls = before; api.setState({ protocols: before }); S.tplSel = t.id; renderTplList(); }, 7000);
+});
+
+// Template editor
+const tplDlg = $('tpl-dialog');
+const tplForm = $('tpl-form');
+let tplMode = { mode: 'new', id: '' };
+function stageRow(s = { label: '', dur: 60, cue: '' }) {
+  const li = document.createElement('li');
+  li.className = 'stage-row';
+  li.innerHTML = '<span class="num"></span><input type="text" data-k="label" placeholder="e.g. Stage…" autocomplete="off" aria-label="Stage label"><input type="text" data-k="dur" placeholder="open" autocomplete="off" aria-label="Duration, m:ss, empty for open-ended"><input type="text" data-k="cue" placeholder="What to do…" autocomplete="off" aria-label="Cue"><button class="m-del" type="button" aria-label="Remove stage">×</button>';
+  li.querySelector('[data-k="label"]').value = s.label;
+  li.querySelector('[data-k="dur"]').value = s.dur ? PR.fmtDur(s.dur) : '';
+  li.querySelector('[data-k="cue"]').value = s.cue || '';
+  li.querySelector('.m-del').addEventListener('click', () => { li.remove(); tplChanged(); });
+  return li;
+}
+function readTpl() {
+  const rows = [...$('stage-rows').children];
+  const stages = rows.map((li) => ({
+    label: li.querySelector('[data-k="label"]').value.trim(),
+    dur: PR.parseDur(li.querySelector('[data-k="dur"]').value),
+    cue: li.querySelector('[data-k="cue"]').value.trim(),
+  }));
+  const f = tplForm.elements;
+  const t = { id: tplMode.id, name: f.name.value.trim(), description: f.description.value.trim(), autoStop: f.autoStop.checked, stages };
+  if (f.repeatOn.checked) t.repeat = { from: Number(f.repeatFrom.value) - 1, to: Number(f.repeatTo.value) - 1, times: Number(f.repeatTimes.value) };
+  return t;
+}
+function tplChanged() {
+  const rows = [...$('stage-rows').children];
+  const f = tplForm.elements;
+  const on = f.repeatOn.checked;
+  for (const x of ['repeatFrom', 'repeatTo', 'repeatTimes']) f[x].disabled = !on;
+  const from = Number(f.repeatFrom.value) - 1;
+  const to = Number(f.repeatTo.value) - 1;
+  rows.forEach((li, i) => {
+    li.querySelector('.num').textContent = i + 1;
+    li.classList.toggle('in-rep', on && i >= from && i <= to);
+  });
+  $('tpl-error').hidden = true;
+  const t = readTpl();
+  const err = PR.validate(t);
+  $('tpl-preview').textContent = err ? '' : `${PR.totals(t).count} stages: ${PR.summary(t)}`;
+}
+function openTplEditor(t, mode) {
+  tplMode = { mode, id: t.id };
+  $('tpl-title').textContent = mode === 'edit' ? 'Edit protocol' : 'New protocol';
+  const f = tplForm.elements;
+  f.name.value = t.name || '';
+  f.description.value = t.description || '';
+  f.autoStop.checked = !!t.autoStop;
+  f.repeatOn.checked = !!(t.repeat && t.repeat.times > 1);
+  f.repeatFrom.value = t.repeat ? t.repeat.from + 1 : 1;
+  f.repeatTo.value = t.repeat ? t.repeat.to + 1 : 1;
+  f.repeatTimes.value = t.repeat ? t.repeat.times : 4;
+  const rows = $('stage-rows');
+  rows.innerHTML = '';
+  for (const s of t.stages) rows.appendChild(stageRow(s));
+  $('tpl-error').hidden = true;
+  tplChanged();
+  tplDlg.showModal();
+  f.name.focus();
+}
+tplForm.addEventListener('input', tplChanged);
+$('stage-add').addEventListener('click', () => {
+  const li = stageRow();
+  $('stage-rows').appendChild(li);
+  tplChanged();
+  li.querySelector('input').focus();
+});
+tplForm.addEventListener('submit', (e) => {
+  if (e.submitter?.value !== 'save') return;
+  const t = readTpl();
+  const err = PR.validate(t);
+  if (err) {
+    e.preventDefault();
+    $('tpl-error').hidden = false;
+    $('tpl-error').textContent = err;
+    return;
+  }
+  if (tplMode.mode === 'edit') S.customTpls = S.customTpls.map((x) => (x.id === t.id ? t : x));
+  else { t.id = `custom-${crypto.randomUUID().slice(0, 8)}`; S.customTpls = [...S.customTpls, t]; }
+  api.setState({ protocols: S.customTpls });
+  S.tplSel = t.id;
+  renderTplList();
 });
 
 // ---------- Registry ----------
@@ -1086,6 +1419,9 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if
   S.profile = { ...DEFAULT_PROFILE, ...(st.profile || {}) };
   S.edges = M.zoneEdges(S.profile);
   if (st.keys) S.keys = st.keys;
+  if (Array.isArray(st.protocols)) S.customTpls = st.protocols;
+  if (st.audio) S.audio = { ...S.audio, ...st.audio };
+  if (st.tplSel) S.tplSel = st.tplSel;
   if (st.range) {
     S.range = st.range === 'all' ? 'all' : Number(st.range);
     for (const x of $('range').children) x.setAttribute('aria-checked', String(x.dataset.range === String(st.range)));
@@ -1096,6 +1432,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if
   buildTiles();
   renderZoneScale();
   renderMarkers();
+  renderProto();
   renderLive();
   loadRegistry();
   if (FAKE && S.state === 'idle') startDemo();
@@ -1105,4 +1442,4 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if
 window.autoConnect = () => { if (S.state === 'idle' && !FAKE) scan(false); };
 
 // Hooks for scripted tests (test instances only drive these through PULSE_SCRIPT).
-window.__pulse = { S, addMarker, openSession, showLive, loadRegistry, stopRecording, openRecDialog, report: () => C.report(S.current.meta, S.current.samples, S.current.markers, S.current.beats) };
+window.__pulse = { S, addMarker, startProtocol, protoNext, protoSkipBlock, endProtocol, findTpl, openProtoDialog, openSession, showLive, loadRegistry, stopRecording, openRecDialog, report: () => C.report(S.current.meta, S.current.samples, S.current.markers, S.current.beats) };
