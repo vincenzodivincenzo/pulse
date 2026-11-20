@@ -1,0 +1,25 @@
+{
+  "name": "pulse",
+  "version": "1.0.0",
+  "description": "Research-oriented heart rate recorder for macOS: any Bluetooth HR sensor, HRV metrics, phase markers, anomaly checks and session reports.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "demo": "PULSE_FAKE=1 electron .",
+    "package": "electron-packager . Pulse --platform=darwin --out=dist --overwrite --icon=build/icon.icns --app-bundle-id=io.github.vincenzodivincenzo.pulse --extend-info=build/extend.plist --ignore=^/dist --ignore=^/build --ignore=^/scripts --ignore=^/docs --ignore=^/README.md --arch=arm64",
+    "package:universal": "electron-packager . Pulse --platform=darwin --out=dist --overwrite --icon=build/icon.icns --app-bundle-id=io.github.vincenzodivincenzo.pulse --extend-info=build/extend.plist --ignore=^/dist --ignore=^/build --ignore=^/scripts --ignore=^/docs --ignore=^/README.md --arch=universal",
+    "dmg": "bash scripts/make-dmg.sh"
+  },
+  "type": "commonjs",
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "45.2.3"
+  },
+  "productName": "Pulse",
+  "license": "MIT",
+  "author": "vincenzodivincenzo",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vincenzodivincenzo/pulse.git"
+  }
+}

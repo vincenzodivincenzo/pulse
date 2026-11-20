@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+  <title>Pulse</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-state="idle" data-view="live">
+  <!-- ============ Sidebar: live + session registry ============ -->
+  <aside class="sidebar">
+    <div class="side-drag"></div>
+    <button class="nav-live" id="nav-live" type="button" aria-current="page">
+      <span class="dot" aria-hidden="true"></span>
+      <span class="nav-live-text"><strong>Live</strong><span id="nav-live-sub" class="muted">No source</span></span>
+      <span class="nav-bpm" id="nav-bpm" aria-label="Current heart rate">--</span>
+    </button>
+
+    <div class="reg-head">
+      <h2>Sessions</h2>
+      <button class="icon-btn small" id="reg-refresh" type="button" aria-label="Refresh sessions" title="Refresh">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.6 7.2A6 6 0 1 0 16 12h-1.7a4.3 4.3 0 1 1-.9-4.3L11 10h5.5V4.5z" fill="currentColor"/></svg>
+      </button>
+    </div>
+    <input class="reg-search" id="reg-search" type="search" name="search" placeholder="Search name, participant…" autocomplete="off" spellcheck="false" aria-label="Search sessions">
+    <ul class="reg-list" id="reg-list" aria-label="Recorded sessions"></ul>
+    <div class="reg-empty" id="reg-empty" hidden>
+      <p><strong>No sessions yet.</strong></p>
+      <p class="muted">Press Record on the live view. Every recording is named and saved here.</p>
+    </div>
+
+    <div class="side-foot">
+      <button class="side-btn" id="devices-btn" type="button">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2 6 6l4 4-4 4 4 4V2zm0 8 4-4m-4 4 4 4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linejoin="round"/></svg>
+        Sources
+      </button>
+      <button class="side-btn" id="profile-btn" type="button">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 10a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zm-6.5 7c.4-3.3 3-5 6.5-5s6.1 1.7 6.5 5z" fill="currentColor"/></svg>
+        Profile &amp; zones
+      </button>
+      <button class="side-btn" id="folder-btn" type="button">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 5.5A1.5 1.5 0 0 1 4 4h3.6l1.6 1.8H16a1.5 1.5 0 0 1 1.5 1.5v7.2A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5z" fill="currentColor"/></svg>
+        Open folder
+      </button>
+    </div>
+  </aside>
+
+  <!-- ============ Live view ============ -->
+  <section class="view" id="view-live" aria-label="Live">
+    <header class="toolbar">
+      <button class="source-chip" id="source-chip" type="button" aria-label="Heart rate source">
+        <span class="dot" aria-hidden="true"></span>
+        <span class="source-text"><strong id="source-title">No source</strong><span id="source-sub" class="muted">Starting…</span></span>
+      </button>
+      <span class="spacer"></span>
+      <button class="btn ghost" id="reset-btn" type="button" title="Clear live stats, chart and markers. The source stays connected.">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.6 7.2A6 6 0 1 0 16 12h-1.7a4.3 4.3 0 1 1-.9-4.3L11 10h5.5V4.5z" fill="currentColor"/></svg>
+        New live session
+      </button>
+      <button class="icon-btn" id="pin-btn" type="button" aria-pressed="false" aria-label="Keep window on top" title="Keep on top">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.6 2.8 17.2 7.4l-1.1 1.1-1-.3-2.6 2.6.2 3.1-1.2 1.2-3-3-3.6 3.6-.9-.9L7.6 11.2l-3-3 1.2-1.2 3.1.2 2.6-2.6-.3-1z" fill="currentColor"/></svg>
+      </button>
+    </header>
+
+    <div class="live-scroll">
+      <div class="live-grid">
+        <!-- Hero -->
+        <section class="card hero" aria-label="Current heart rate">
+          <div class="hero-live">
+            <div class="bpm-row">
+              <span id="bpm" class="bpm">--</span>
+              <span class="unit">bpm</span>
+            </div>
+            <div class="zone-label">
+              <span class="zone-chip" id="zone-chip">–</span>
+              <span id="zone-name">No signal</span>
+              <span class="muted" id="zone-pct"></span>
+            </div>
+            <div class="zonebar" id="zonebar" aria-hidden="true">
+              <span data-z="1"></span><span data-z="2"></span><span data-z="3"></span><span data-z="4"></span><span data-z="5"></span>
+              <i class="marker" id="marker"></i>
+            </div>
+            <div class="zone-scale" id="zone-scale" aria-hidden="true"></div>
+            <p class="warn" id="warn" hidden></p>
+          </div>
+
+          <div class="finder" id="finder" aria-live="polite">
+            <h2 id="finder-title">Connect a heart rate source</h2>
+            <p id="finder-body" class="muted">Any Bluetooth heart rate strap, armband, or watch in heart rate broadcast mode works.</p>
+            <ul class="device-list" id="device-list"></ul>
+            <div class="finder-actions">
+              <button class="btn primary" id="scan-btn" type="button">Scan for Bluetooth sensors</button>
+              <button class="btn" id="finder-net-btn" type="button">Network input…</button>
+              <button class="btn ghost" id="demo-btn" type="button">Try demo data</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Derived metrics -->
+        <section class="card metrics" aria-label="Derived metrics">
+          <div class="card-head"><h2>Live metrics</h2><span class="muted" id="metrics-note">Rolling windows</span></div>
+          <div class="tiles" id="tiles"></div>
+        </section>
+
+        <!-- Chart -->
+        <section class="card chart-card" aria-label="Heart rate chart">
+          <div class="card-head">
+            <h2>Heart rate &amp; RR intervals</h2>
+            <span class="muted" id="session-time">00:00</span>
+            <span class="spacer"></span>
+            <div class="segmented" role="radiogroup" aria-label="Chart range" id="range">
+              <button type="button" role="radio" aria-checked="false" data-range="60000">1 min</button>
+              <button type="button" role="radio" aria-checked="true" data-range="300000">5 min</button>
+              <button type="button" role="radio" aria-checked="false" data-range="900000">15 min</button>
+              <button type="button" role="radio" aria-checked="false" data-range="all">All</button>
+            </div>
+          </div>
+          <canvas id="chart" role="img" aria-label="Heart rate and RR interval chart"></canvas>
+        </section>
+
+        <!-- Markers -->
+        <section class="card session-card" aria-label="Markers">
+          <div class="card-head">
+            <h2 id="session-title">Markers</h2>
+            <span class="phase-pill" id="phase-pill" hidden></span>
+            <span class="spacer"></span>
+            <button class="icon-btn small" id="keys-btn" type="button" aria-label="Edit annotation keys" title="Edit annotation keys">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5.5A1.5 1.5 0 0 1 4.5 4h11A1.5 1.5 0 0 1 17 5.5v9a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5zM5.5 7v1.6h1.6V7zm3.7 0v1.6h1.6V7zm3.7 0v1.6h1.6V7zM5.5 10.4V12h1.6v-1.6zm3.7 0V12h1.6v-1.6zm3.7 0V12h1.6v-1.6z" fill="currentColor" fill-rule="evenodd"/></svg>
+            </button>
+          </div>
+          <div class="keys" id="keys" role="group" aria-label="Annotation keys"></div>
+          <form class="note-row" id="note-row" hidden>
+            <span class="note-time" id="note-time">00:00</span>
+            <input id="note-input" type="text" name="note" placeholder="What happened? Enter saves, Esc cancels…" autocomplete="off" aria-label="Note">
+          </form>
+          <ol class="markers" id="markers" aria-label="Markers"></ol>
+          <p class="hint muted" id="session-hint"></p>
+        </section>
+
+        <!-- Anomalies -->
+        <section class="card anomalies-card" aria-label="Anomalies">
+          <div class="card-head"><h2>Checks</h2><span class="count-pill" id="anom-count">0</span></div>
+          <ol class="anoms" id="anoms"></ol>
+          <p class="hint muted" id="anom-empty">No anomalies. Pulse watches for dropouts, sudden jumps, flatlines, irregular beats, lost contact and out-of-range heart rate.</p>
+        </section>
+      </div>
+    </div>
+
+    <footer class="recbar">
+      <button class="btn rec" id="rec-btn" type="button" disabled>
+        <span class="rec-dot" aria-hidden="true"></span><span id="rec-label">Record</span>
+      </button>
+      <div class="rec-info">
+        <strong id="rec-name">Not recording</strong>
+        <span class="muted" id="rec-sub">Connect a source to record a named session.</span>
+      </div>
+      <span class="spacer"></span>
+      <div class="zt">
+        <span class="zt-label muted">Time in zones</span>
+        <canvas id="zt-bar" width="240" height="10" aria-hidden="true"></canvas>
+        <span class="zt-text muted" id="zt-text">–</span>
+      </div>
+    </footer>
+  </section>
+
+  <!-- ============ Session view ============ -->
+  <section class="view" id="view-session" aria-label="Session" hidden>
+    <header class="toolbar">
+      <div class="title-edit">
+        <input class="title-input" id="s-name" type="text" name="session-name" aria-label="Session name" autocomplete="off" spellcheck="false">
+        <span class="muted" id="s-meta"></span>
+      </div>
+      <span class="spacer"></span>
+      <button class="btn ghost" id="s-reanalyze" type="button" title="Recompute every metric from the raw files with the current profile">Re-analyze</button>
+      <button class="btn" id="s-png" type="button">Export PNG</button>
+      <button class="icon-btn" id="s-reveal" type="button" aria-label="Show in Finder" title="Show in Finder">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 5.5A1.5 1.5 0 0 1 4 4h3.6l1.6 1.8H16a1.5 1.5 0 0 1 1.5 1.5v7.2A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5z" fill="currentColor"/></svg>
+      </button>
+      <button class="icon-btn danger" id="s-trash" type="button" aria-label="Move session to Trash" title="Move to Trash">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 3h5l.6 1.5H16V6H4V4.5h2.9zM5.2 7h9.6l-.7 9.1a1 1 0 0 1-1 .9H6.9a1 1 0 0 1-1-.9z" fill="currentColor"/></svg>
+      </button>
+    </header>
+    <div class="session-scroll">
+      <p class="banner" id="s-banner" hidden></p>
+      <div class="s-tiles" id="s-tiles"></div>
+      <section class="card">
+        <div class="card-head"><h2>Full session</h2><span class="muted">Hover for values · red dots are flagged beats</span></div>
+        <canvas id="s-chart" role="img" aria-label="Full session heart rate chart"></canvas>
+      </section>
+      <div class="s-grid">
+        <section class="card">
+          <div class="card-head"><h2>Phases</h2></div>
+          <div class="table-wrap"><table class="ptable" id="s-phases"></table></div>
+          <p class="hint muted" id="s-phases-empty" hidden>No phase markers in this session. Use keys 1–9 while recording to split it into phases.</p>
+          <div class="recov" id="s-recovery"></div>
+        </section>
+        <section class="card">
+          <div class="card-head"><h2>Checks</h2><span class="count-pill" id="s-anom-count">0</span></div>
+          <ol class="anoms" id="s-anoms"></ol>
+          <div class="zt-block">
+            <span class="muted">Time in zones</span>
+            <canvas id="s-zt" aria-hidden="true"></canvas>
+            <div class="zt-legend" id="s-zt-legend"></div>
+          </div>
+        </section>
+      </div>
+      <section class="card">
+        <div class="card-head"><h2>Details</h2><span class="muted" id="s-saved" aria-live="polite"></span></div>
+        <div class="details-grid">
+          <label>Participant<input id="s-participant" type="text" name="participant" autocomplete="off" spellcheck="false"></label>
+          <label>Protocol<input id="s-protocol" type="text" name="protocol" autocomplete="off" list="protocols"></label>
+          <label class="wide">Notes<textarea id="s-notes" name="notes" rows="3" placeholder="Conditions, equipment, deviations from protocol…"></textarea></label>
+        </div>
+        <p class="hint muted" id="s-files"></p>
+      </section>
+    </div>
+  </section>
+
+  <div class="sr-only" id="announce" aria-live="polite"></div>
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <datalist id="protocols">
+    <option value="Resting HRV (5 min supine)">
+    <option value="Orthostatic test">
+    <option value="Incremental / ramp test">
+    <option value="Interval session">
+    <option value="Steady-state endurance">
+    <option value="Recovery test">
+    <option value="Stress / cognitive task">
+  </datalist>
+
+  <!-- ============ Dialogs ============ -->
+  <dialog id="rec-dialog" class="wide">
+    <form method="dialog" id="rec-form" novalidate>
+      <h2>New recording</h2>
+      <p class="muted">Every session is saved with a name to the registry.</p>
+      <div class="form-grid">
+        <label class="wide">Session name <span class="req">required</span>
+          <input name="name" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. Ramp test P01…">
+          <span class="field-error" id="rec-name-error" hidden></span>
+        </label>
+        <label>Participant ID<input name="participant" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. P01…"></label>
+        <label>Protocol<input name="protocol" type="text" autocomplete="off" list="protocols" placeholder="Pick or type…"></label>
+      </div>
+      <fieldset class="profile-fields">
+        <legend>Participant profile <span class="muted">sets the zones</span></legend>
+        <div class="form-grid four" data-profile></div>
+        <p class="zones-preview muted" data-zones-preview></p>
+      </fieldset>
+      <label class="wide">Notes<textarea name="notes" rows="2" placeholder="Conditions, equipment…"></textarea></label>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button class="btn ghost" value="cancel" formnovalidate type="submit">Cancel</button>
+        <button class="btn rec on" value="start" type="submit"><span class="rec-dot" aria-hidden="true"></span>Start recording</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="profile-dialog" class="wide">
+    <form method="dialog" id="profile-form" novalidate>
+      <h2>Profile &amp; zones</h2>
+      <p class="muted">Standard 5-zone model: 50–60, 60–70, 70–80, 80–90 and 90–100% of max heart rate. Add a resting HR to use heart rate reserve (Karvonen) instead.</p>
+      <div class="form-grid four" data-profile></div>
+      <p class="zones-preview muted" data-zones-preview></p>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button class="btn ghost" value="cancel" formnovalidate type="submit">Cancel</button>
+        <button class="btn primary" value="save" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="devices-dialog" class="wide">
+    <form method="dialog" id="devices-form">
+      <h2>Sources</h2>
+      <section class="src">
+        <div class="src-head"><h3>Bluetooth</h3><span class="muted">Chest straps, armbands, watches broadcasting heart rate</span></div>
+        <p class="muted small">Works with Garmin, Polar, Wahoo, Coros, Suunto, Whoop, Scosche, Coospo and any sensor using the standard Heart Rate profile. On a watch, turn on heart rate broadcast first.</p>
+        <ul class="device-list" id="dlg-device-list"></ul>
+        <div class="finder-actions">
+          <button class="btn primary" id="dlg-scan" type="button">Scan</button>
+          <button class="btn ghost" id="dlg-forget" type="button">Forget remembered sensor</button>
+        </div>
+      </section>
+      <section class="src">
+        <div class="src-head"><h3>Network input</h3><span class="muted">Apple Watch relays, phones, scripts, other apps</span></div>
+        <label class="switch"><input type="checkbox" id="net-toggle"> Accept heart rate over the local network</label>
+        <div class="net-info" id="net-info" hidden>
+          <p class="small">Send <code>POST /hr</code> with JSON <code>{"bpm":72,"rr":[812,830],"source":"Apple Watch"}</code> and header <code>X-Pulse-Token</code>, or a simple GET:</p>
+          <div class="copy-row"><code id="net-url"></code><button class="btn small" id="net-copy" type="button">Copy</button></div>
+          <p class="muted small" id="net-last">Nothing received yet.</p>
+          <button class="btn ghost small" id="net-token" type="button">New token</button>
+        </div>
+      </section>
+      <section class="src">
+        <div class="src-head"><h3>Demo</h3><span class="muted">Simulated strap with RR intervals</span></div>
+        <button class="btn" id="dlg-demo" type="button">Start demo data</button>
+      </section>
+      <div class="dialog-actions"><span class="spacer"></span><button class="btn primary" value="close" type="submit">Done</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="keys-dialog" class="wide">
+    <form method="dialog" id="keys-form">
+      <h2>Annotation keys</h2>
+      <p class="muted">Press a number to drop a marker. A phase labels every reading after it until the next phase. N always adds a free note.</p>
+      <div class="key-rows" id="key-rows"></div>
+      <div class="dialog-actions">
+        <button class="btn ghost" id="keys-reset" type="button">Reset to defaults</button>
+        <span class="spacer"></span>
+        <button class="btn ghost" value="cancel" formnovalidate type="submit">Cancel</button>
+        <button class="btn primary" value="save" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="metrics.js"></script>
+  <script src="charts.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
