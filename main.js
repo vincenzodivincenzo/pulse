@@ -318,7 +318,9 @@ ipcMain.handle('registry:list', () => {
   for (const name of fs.readdirSync(root)) {
     const dir = path.join(root, name);
     const meta = readJson(path.join(dir, 'session.json'));
-    if (!meta || meta.format !== 'pulse-session') continue;
+    if (!meta) continue;
+    const legacy = meta.format !== 'pulse-session';
+    if (legacy && !fs.existsSync(path.join(dir, 'heart_rate.csv'))) continue;
     out.push({
       dir,
       folder: name,
@@ -335,6 +337,7 @@ ipcMain.handle('registry:list', () => {
       markers: meta.markers?.length ?? 0,
       recording: !!meta.recording && rec?.dir === dir,
       incomplete: !!meta.recording && rec?.dir !== dir,
+      legacy,
     });
   }
   return out.sort((a, b) => String(b.started_at).localeCompare(String(a.started_at)));
@@ -365,9 +368,17 @@ ipcMain.handle('session:load', (_e, dir) => loadSession(dir));
 ipcMain.handle('session:reanalyze', (_e, dir, profile) => {
   if (rec?.dir === dir) throw new Error('This session is still recording');
   const { meta, samples, markers } = loadSession(dir);
+  if (meta.format !== 'pulse-session') {
+    // Old format: keep the original files before rewriting them.
+    for (const f of ['heart_rate.csv', 'markers.csv', 'session.json']) {
+      const src = path.join(dir, f);
+      const bak = path.join(dir, f.replace(/(\.\w+)$/, '.original$1'));
+      if (fs.existsSync(src) && !fs.existsSync(bak)) fs.copyFileSync(src, bak);
+    }
+  }
   const start = Date.parse(meta.started_at) || samples[0]?.t;
   const end = Date.parse(meta.ended_at) || samples[samples.length - 1]?.t || start;
-  const summary = finalize(dir, { ...meta, profile: profile || meta.profile }, samples, markers, start, end);
+  const summary = finalize(dir, { ...meta, profile: profile || meta.profile || {} }, samples, markers, start, end);
   send('registry:changed');
   return summary;
 });

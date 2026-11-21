@@ -1188,6 +1188,7 @@ function renderRegistry() {
     const badges = [
       s.recording ? '<span class="badge rec">REC</span>' : '',
       s.incomplete ? '<span class="badge" title="Ended without a summary. Open and re-analyze.">incomplete</span>' : '',
+      s.legacy ? '<span class="badge" title="Recorded with an earlier version. Open and re-analyze to upgrade.">old format</span>' : '',
       s.flags ? `<span class="badge flag" title="${s.flags} physiological flags">${s.flags} flag${s.flags > 1 ? 's' : ''}</span>` : '',
     ].join('');
     const line1 = [s.started_at ? shortDate.format(new Date(s.started_at)) : '', s.duration_s != null ? clock(s.duration_s * 1000) : ''].filter(Boolean).join(' · ');
@@ -1250,13 +1251,16 @@ function renderSession() {
   const { meta } = S.current;
   const { t0 } = sessionTimes();
   const isRec = S.rec?.dir === S.current.dir;
+  const legacy = meta.format !== 'pulse-session';
   $('s-name').value = meta.name || '';
   $('s-meta').textContent = [meta.participant && `Participant ${meta.participant}`, meta.protocol, meta.started_at && dateFmt.format(new Date(meta.started_at)), meta.duration_s != null && clock(meta.duration_s * 1000), meta.device].filter(Boolean).join(' · ');
   const banner = $('s-banner');
-  banner.hidden = !(meta.recording);
-  banner.textContent = isRec ? 'This session is still recording. Stop it from the live view to see its full analysis.' : 'This session ended without a summary (the app quit or crashed). Re-analyze to rebuild it from the raw files.';
+  banner.hidden = !(meta.recording || legacy);
+  banner.textContent = isRec ? 'This session is still recording. Stop it from the live view to see its full analysis.'
+    : legacy ? 'Recorded with an earlier version of Pulse. Press Re-analyze to compute the full analysis with your current profile. The original files are kept as *.original.csv / .json.'
+    : 'This session ended without a summary (the app quit or crashed). Re-analyze to rebuild it from the raw files.';
   $('s-reanalyze').disabled = isRec;
-  $('s-png').disabled = !!meta.recording;
+  $('s-png').disabled = !!meta.recording || legacy;
   $('s-trash').disabled = isRec;
 
   const o = meta.overall || {};
@@ -1341,7 +1345,8 @@ for (const [id, key] of [['s-participant', 'participant'], ['s-protocol', 'proto
 $('s-reanalyze').addEventListener('click', async () => {
   const dir = S.current.dir;
   try {
-    await api.sessionReanalyze(dir);
+    const legacy = S.current.meta.format !== 'pulse-session';
+    await api.sessionReanalyze(dir, legacy ? S.profile : undefined);
     await openSession(dir);
     toast('Re-analyzed from the raw files.');
   } catch (err) { toast(`Re-analysis failed: ${err.message}`); }
